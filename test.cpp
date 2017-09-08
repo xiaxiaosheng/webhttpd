@@ -8,8 +8,8 @@ void helloworld(twebhttpd::HttpRequest* req, twebhttpd::HttpResponse resp) {
 }
 
 int main() {
-    twebhttpd::Server server;
-    server.set_port(8080);
-    server.handle_func("/hello", (twebhttpd::HandlerFunction*)helloworld);
-    server.start_service();
+    twebhttpd::WebHttpd http;
+    http.set_port(8080);
+    http.handle_func("/hello", (twebhttpd::HandlerFunction*)helloworld);
+    http.start_service();
 }

@@ -1,3 +1,3 @@
 #!/bin/sh
 
-g++ webhttpd.h webhttpd.cpp test.cpp -o server
+g++ -o server webhttpd.cpp test.cpp

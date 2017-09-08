@@ -11,7 +11,7 @@ namespace twebhttpd {
 
 int HttpRequest::init(HttpInfoTrans* http_info) {
     std::string tmp, req_line;
-    int len = Server::read_line(http_info->sock_, req_line);
+    int len = WebHttpd::read_line(http_info->sock_, req_line);
     if(len < 0) return -1;
     std::vector<std::string> req_header = this->split_header(req_line.c_str(), (char*)" ");
     if(req_header.size() < 3) {
@@ -21,7 +21,7 @@ int HttpRequest::init(HttpInfoTrans* http_info) {
     this->header.path = req_header[1];
     this->header.http_version = req_header[2];
     while(1) {
-        len = Server::read_line(http_info->sock_, tmp);
+        len = WebHttpd::read_line(http_info->sock_, tmp);
         if(len <= 0) break;
         req_header = this->split_header(tmp.c_str(), (char*)" ");
         if(req_header.size() < 2) continue;
@@ -29,7 +29,7 @@ int HttpRequest::init(HttpInfoTrans* http_info) {
     }
     if((int)this->header.method.find("POST") >= 0) {
         int length = atoi(this->header.get("Content-Length").c_str());
-        Server::read_bytes(http_info->sock_, this->body_, length);
+        WebHttpd::read_bytes(http_info->sock_, this->body_, length);
         puts(this->body_.c_str());
     }
     return 0;
@@ -114,7 +114,7 @@ void HttpResponse::resp_error404() {
     this->do_resp();
 }
 
-Server::Server() {
+WebHttpd::WebHttpd() {
     this->port_ = 80;
     this->server_addr_ = htonl(INADDR_ANY);
     this->handler_route_ = NULL;
@@ -122,11 +122,11 @@ Server::Server() {
     close(this->sock_);
 }
 
-Server::~Server() {
+WebHttpd::~WebHttpd() {
     delete this->handler_route_;
 }
 
-int Server::read_line(int sock, std::string& line) {
+int WebHttpd::read_line(int sock, std::string& line) {
     char c = 0;
     int len = 0;
     line.clear();
@@ -141,7 +141,7 @@ int Server::read_line(int sock, std::string& line) {
     return line.length();
 }
 
-int Server::read_bytes(int sock, std::string& line, int len) {
+int WebHttpd::read_bytes(int sock, std::string& line, int len) {
     if(len <= 0) return 0;
     char c = 0;
     char buffer[len + 1];
@@ -153,7 +153,7 @@ int Server::read_bytes(int sock, std::string& line, int len) {
     return ll;
 }
 
-void* Server::response_handler(void* p) {
+void* WebHttpd::response_handler(void* p) {
     if(NULL == p) {
         return NULL;
     }
@@ -186,14 +186,14 @@ void* Server::response_handler(void* p) {
     return NULL;
 }
 
-void Server::handle_func(std::string path, HandlerFunction* func) {
+void WebHttpd::handle_func(std::string path, HandlerFunction* func) {
     if(NULL == this->handler_route_) {
         this->handler_route_ = new router;
     }
     (*this->handler_route_)[path] = func;
 }
 
-int Server::start_service() {
+int WebHttpd::start_service() {
     this->server_sock_addr_.sin_family = AF_INET;
     this->server_sock_addr_.sin_addr.s_addr = this->server_addr_;
     this->server_sock_addr_.sin_port = htons(this->port_);
@@ -223,7 +223,7 @@ int Server::start_service() {
             http_info->sock_ = client_sock;
             http_info->handler_route_ = this->handler_route_;
             http_info->client_addr_ = client_sock_addr;
-            pthread_create(&pth_handler, NULL, Server::response_handler, (void*)http_info);
+            pthread_create(&pth_handler, NULL, WebHttpd::response_handler, (void*)http_info);
             pthread_detach(pth_handler);
         } catch(...) {
 

@@ -21,8 +21,7 @@
 #define BUFFSIZE 256
 
 namespace twebhttpd {
-
-class Server;
+    
 class WebHttpd;
 class Header;
 class HttpRequest;
@@ -105,14 +104,14 @@ private:
 };
 
 
-class Server {
+class WebHttpd {
 public:
     inline void set_port(int port) {
         this->port_ = port;
     }
 
-    Server();
-    ~Server();
+    WebHttpd();
+    ~WebHttpd();
 
     int start_service();
 
@@ -127,15 +126,6 @@ private:
     u_int32_t server_addr_;
     sockaddr_in server_sock_addr_;
     std::map<std::string, HandlerFunction*>* handler_route_;
-
-};
-
-
-class WebHttpd {
-
-public:
-
-private:
 
 };
 
