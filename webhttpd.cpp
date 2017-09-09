@@ -7,22 +7,23 @@
 
 namespace twebhttpd {
 
+std::set<int> WebHttpd::g_sock_sets;
 
-
-int HttpRequest::init(HttpInfoTrans* http_info) {
+int HttpRequest::parse_request(HttpInfoTrans* http_info) {
     std::string tmp, req_line;
     int len = WebHttpd::read_line(http_info->sock_, req_line);
-    if(len < 0) return -1;
+    if(len < 0) return -1;  // read socket error return -1 to close connection
     std::vector<std::string> req_header = this->split_header(req_line.c_str(), (char*)" ");
     if(req_header.size() < 3) {
-        return -1;
+        return 1;  // error header, not close connection
     }
     this->header.method = req_header[0];
     this->header.path = req_header[1];
     this->header.http_version = req_header[2];
     while(1) {
         len = WebHttpd::read_line(http_info->sock_, tmp);
-        if(len <= 0) break;
+        if(len < 0) return -1;
+        else if(0 == len) break;
         req_header = this->split_header(tmp.c_str(), (char*)" ");
         if(req_header.size() < 2) continue;
         this->header.add(req_header[0], req_header[1]);
@@ -69,8 +70,15 @@ HttpResponse::~HttpResponse() {
     
 }
 
-void HttpResponse::init(HttpInfoTrans* http_info) {
+void HttpResponse::init(HttpRequest* req, HttpInfoTrans* http_info) {
+    if(NULL == req || NULL == http_info) return;
     this->sock_ = http_info->sock_;
+    std::string conn = req->header.get("Connection");
+    std::transform(conn.begin(), conn.end(), conn.begin(), toupper);
+    if((int)conn.find("KEEP-ALIVE") >= 0 ||
+        (int)req->header.http_version.find("1.1") >= 0) {
+            this->header.add("Connection", "Keep-Alive");
+    }
 }
 
 void HttpResponse::writer(const std::string& str) {
@@ -110,7 +118,7 @@ void HttpResponse::send_line(char buff[]) {
 void HttpResponse::resp_error404() {
     this->header.status = "Not Found";
     this->header.status_code = "404";
-    this->body_ = "404 page not found";
+    this->body_ = "404 page not found"; 
     this->do_resp();
 }
 
@@ -132,7 +140,11 @@ int WebHttpd::read_line(int sock, std::string& line) {
     line.clear();
     while(1) {
         len = recv(sock, &c, 1, 0);
-        if(len < 0) return -1;
+        if(len < 0) {
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            return -1;
+        }
         if(0 == len) break;
         if('\r' == c) continue;
         if('\n' == c) break;
@@ -158,31 +170,44 @@ void* WebHttpd::response_handler(void* p) {
         return NULL;
     }
     HttpInfoTrans* http_info = (HttpInfoTrans*)p;
-    HttpRequest* req = new HttpRequest;
     bool keep_alive = true;
+    int res = 0;
     while(keep_alive) {
-        if(req->init(http_info) < 0) break;
+        HttpRequest* req = new HttpRequest;
         HttpResponse resp;
-        resp.init(http_info);
+        res = req->parse_request(http_info);
+        if(res < 0) {
+            if(req != NULL) delete req;
+            break;
+        }
+        if(res > 0) {
+            if(req != NULL) delete req;
+            continue;
+        }
+        resp.init(req, http_info);
         router::iterator iter;
         if(NULL != http_info->handler_route_)
             iter = http_info->handler_route_->find(req->header.path);
         if(NULL == http_info->handler_route_ || http_info->handler_route_->end() == iter) { // the router not exist
-            printf("router not found, response 404\n");
             resp.resp_error404();
+            if(req != NULL) delete req;
             continue;
         }
         HandlerFunction* serve = (HandlerFunction*)iter->second;
         // if not keep-alive
-        if(!((req->header.http_version.find("1.1") && (int)req->header.get("Connection").find("close") < 0) || 
-            (int)req->header.get("Connection").find("keep-alive") >= 0)) {
+        std::string conn_pro = req->header.get("Connection");
+        if(!((req->header.http_version.find("1.1") && (int)conn_pro.find("CLOSE") < 0) || 
+            (int)conn_pro.find("KEEP-ALIVE") >= 0)) {
             keep_alive = false;
             resp.header.add("Connection", "close");
         }
         serve(req, resp);
+        if(req != NULL) delete req;
     }
     shutdown(http_info->sock_, SHUT_RDWR);
     close(http_info->sock_);
+    WebHttpd::g_sock_sets.erase(http_info->sock_);
+    if(http_info != NULL) delete http_info;
     return NULL;
 }
 
@@ -209,6 +234,8 @@ int WebHttpd::start_service() {
         printf("listen error!\n");
         return -1;
     }
+    WebHttpd::g_sock_sets.insert(this->sock_);
+    signal(SIGINT, WebHttpd::stop);
     while(true) {
         try {
             socklen_t sin_size = sizeof(struct sockaddr_in);
@@ -217,8 +244,10 @@ int WebHttpd::start_service() {
             pthread_t pth_handler;
             if((client_sock = accept(this->sock_, (struct sockaddr*)client_sock_addr, &sin_size )) < 0) {
                 printf("accept error!\n");
-                continue;
+                if(client_sock_addr != NULL) delete client_sock_addr;
+                break;
             }
+            WebHttpd::g_sock_sets.insert(client_sock);
             HttpInfoTrans* http_info = new HttpInfoTrans;
             http_info->sock_ = client_sock;
             http_info->handler_route_ = this->handler_route_;
@@ -229,6 +258,16 @@ int WebHttpd::start_service() {
 
         }
     }
+    return 0;
+}
+
+void WebHttpd::stop(int sign) {
+    for(std::set<int>::iterator iter = WebHttpd::g_sock_sets.begin(); iter != WebHttpd::g_sock_sets.end();iter++) {
+        shutdown(*iter, SHUT_RDWR);
+        close(*iter);
+    }
+    WebHttpd::g_sock_sets.clear();
+    exit(0);
 }
 
 }

@@ -17,11 +17,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <cstdlib>
+#include <set>
 
 #define BUFFSIZE 256
 
 namespace twebhttpd {
-    
+
 class WebHttpd;
 class Header;
 class HttpRequest;
@@ -75,7 +76,7 @@ class HttpRequest {
 private:
     std::vector<std::string> split_header(const char*, char*);
 public:
-    int init(HttpInfoTrans*);
+    int parse_request(HttpInfoTrans*);
     Header header;
 
 private:
@@ -90,7 +91,7 @@ public:
 public:
     HttpResponse();
     ~HttpResponse();
-    void init(HttpInfoTrans*);
+    void init(HttpRequest*, HttpInfoTrans*);
 
     void resp_error404();
     void resp_error500(){}
@@ -114,19 +115,23 @@ public:
     ~WebHttpd();
 
     int start_service();
+    int stop();
 
-    static void* response_handler(void*);
     static int read_line(int, std::string&);
     static int read_bytes(int, std::string&, int);
     void handle_func(std::string, HandlerFunction*);
 
 private:
-    int sock_;
+    static void* response_handler(void*);
+
+     int sock_;
     uint port_;
     u_int32_t server_addr_;
     sockaddr_in server_sock_addr_;
-    std::map<std::string, HandlerFunction*>* handler_route_;
+    static std::set<int> g_sock_sets;
 
+    std::map<std::string, HandlerFunction*>* handler_route_;
+    static void stop(int);
 };
 
 }
