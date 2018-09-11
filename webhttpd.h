@@ -66,6 +66,7 @@ struct HttpInfoTrans {
     int sock_;
     router* handler_route_;
     sockaddr_in* client_addr_;
+    HandlerFunction* static_file_handler;
 
     inline ~HttpInfoTrans() {
         delete this->client_addr_;
@@ -75,6 +76,9 @@ struct HttpInfoTrans {
 class HttpRequest {
 private:
     std::vector<std::string> split_header(const char*, char*);
+    void parse_get_param(std::string);
+    void parse_post_param(std::string);
+    void parse_param(std::string);
 public:
     int parse_request(HttpInfoTrans*);
     Header header;
@@ -105,6 +109,11 @@ private:
 };
 
 
+struct FileHandler {
+	std::string strip_prefix;
+	std::string path;
+};
+
 class WebHttpd {
 public:
     inline void set_port(int port) {
@@ -121,6 +130,10 @@ public:
     static int read_bytes(int, std::string&, int);
     void handle_func(std::string, HandlerFunction*);
 
+public:
+    HandlerFunction* static_file_handler_;
+//    void* add_file_handler(std::string, std::string, std::string);
+
 private:
     static void* response_handler(void*);
 
@@ -131,7 +144,9 @@ private:
     static std::set<int> g_sock_sets;
 
     std::map<std::string, HandlerFunction*>* handler_route_;
+    //static std::map<std::string, FileHandler>* file_handler_route_;
     static void stop(int);
+
 };
 
 }

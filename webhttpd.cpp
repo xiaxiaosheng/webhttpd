@@ -9,6 +9,7 @@ namespace twebhttpd {
 
 std::set<int> WebHttpd::g_sock_sets;
 
+
 int HttpRequest::parse_request(HttpInfoTrans* http_info) {
     std::string tmp, req_line;
     int len = WebHttpd::read_line(http_info->sock_, req_line);
@@ -36,15 +37,33 @@ int HttpRequest::parse_request(HttpInfoTrans* http_info) {
     return 0;
 }
 
+void HttpRequest::parse_get_param(std::string param_str) {
+    std::string path = "";
+    char *tmp = (char*)param_str.c_str();
+    int p = 0;
+    for(;p < (int)param_str.length();p++) {
+        if('?' == tmp[p]) break; 
+	path += tmp[p];
+    }
+    param_str = tmp;
+}
+
+void HttpRequest::parse_post_param(std::string param_str) {
+
+}
+
+void HttpRequest::parse_param(std::string param_str) {
+
+}
+
 std::vector<std::string> HttpRequest::split_header(const char* s, char* step) {
     std::vector<std::string> arr;
     arr.clear();
     if(NULL == s) return arr;
     std::string tmp;
-    char* ptr;
-    int index;
+    char* ptr = NULL;
     while(1) {
-        ptr = strstr(s, step);
+        ptr = (char*)strstr(s, step);
         if(NULL == ptr) {
             tmp = s;
             arr.push_back(tmp);
@@ -126,12 +145,17 @@ WebHttpd::WebHttpd() {
     this->port_ = 80;
     this->server_addr_ = htonl(INADDR_ANY);
     this->handler_route_ = NULL;
+    //this->file_handler_route_ = NULL;
     shutdown(this->sock_, SHUT_RDWR);
     close(this->sock_);
 }
 
 WebHttpd::~WebHttpd() {
-    delete this->handler_route_;
+    if(this->handler_route_ != NULL)
+        delete this->handler_route_;
+    this->stop(0);
+    //if(this->file_handler_route_ != NULL)
+    //	delete this->file_handler_route_;
 }
 
 int WebHttpd::read_line(int sock, std::string& line) {
@@ -155,7 +179,6 @@ int WebHttpd::read_line(int sock, std::string& line) {
 
 int WebHttpd::read_bytes(int sock, std::string& line, int len) {
     if(len <= 0) return 0;
-    char c = 0;
     char buffer[len + 1];
     memset(buffer, 0, sizeof(buffer));
     line.clear();
@@ -165,49 +188,71 @@ int WebHttpd::read_bytes(int sock, std::string& line, int len) {
     return ll;
 }
 
+
+void file_handle(std::map<std::string, FileHandler>* router, HttpRequest* req, HttpResponse resp) {}
+
 void* WebHttpd::response_handler(void* p) {
+    try {
     if(NULL == p) {
         return NULL;
     }
     HttpInfoTrans* http_info = (HttpInfoTrans*)p;
     bool keep_alive = true;
     int res = 0;
+    puts("hahahaha");
     while(keep_alive) {
         HttpRequest* req = new HttpRequest;
         HttpResponse resp;
-        res = req->parse_request(http_info);
+        if(req != NULL) {
+            res = req->parse_request(http_info);
+        } else {
+            resp.resp_error500();
+            return NULL;
+        }
         if(res < 0) {
             if(req != NULL) delete req;
-            break;
+            resp.resp_error500();
+            return NULL;
         }
         if(res > 0) {
             if(req != NULL) delete req;
-            continue;
+            resp.resp_error500();
+            return NULL;
         }
         resp.init(req, http_info);
         router::iterator iter;
         if(NULL != http_info->handler_route_)
             iter = http_info->handler_route_->find(req->header.path);
-        if(NULL == http_info->handler_route_ || http_info->handler_route_->end() == iter) { // the router not exist
-            resp.resp_error404();
+        if((http_info->handler_route_ != NULL && http_info->handler_route_->end() != iter) || http_info->static_file_handler != NULL) {
+            HandlerFunction* serve = NULL;
+            if(http_info->handler_route_ != NULL && http_info->handler_route_->end() != iter) {
+                serve = (HandlerFunction*)iter->second;
+            } else {
+                serve = http_info->static_file_handler;
+            }
+            // if not keep-alive
+            std::string conn_pro = req->header.get("Connection");
+            if(!((req->header.http_version.find("1.1") && (int)conn_pro.find("CLOSE") < 0) ||
+                (int)conn_pro.find("KEEP-ALIVE") >= 0)) {
+                keep_alive = false;
+                resp.header.add("Connection", "close");
+            }
+            serve(req, resp);
             if(req != NULL) delete req;
-            continue;
+        } else {
+            resp.resp_error404();
         }
-        HandlerFunction* serve = (HandlerFunction*)iter->second;
-        // if not keep-alive
-        std::string conn_pro = req->header.get("Connection");
-        if(!((req->header.http_version.find("1.1") && (int)conn_pro.find("CLOSE") < 0) || 
-            (int)conn_pro.find("KEEP-ALIVE") >= 0)) {
-            keep_alive = false;
-            resp.header.add("Connection", "close");
-        }
-        serve(req, resp);
-        if(req != NULL) delete req;
+	//if(http_info->handler_route_ == NULL || http_info->handler_route_->end() == iter) {
+	//    file_handle(WebHttpd::file_handler_route_, req, resp);
+	//}
     }
     shutdown(http_info->sock_, SHUT_RDWR);
     close(http_info->sock_);
     WebHttpd::g_sock_sets.erase(http_info->sock_);
     if(http_info != NULL) delete http_info;
+    } catch(...) {
+        printf("catch exception!\n");
+    }
     return NULL;
 }
 
@@ -217,6 +262,16 @@ void WebHttpd::handle_func(std::string path, HandlerFunction* func) {
     }
     (*this->handler_route_)[path] = func;
 }
+
+//void* WebHttpd::add_file_handler(std::string prefix, std::string stripfix, std::string path) {
+    /*twebhttpd::FileHandler handler;
+    handler.strip_prefix = stripfix;
+    handler.path = path;
+    if(NULL == this->file_handler_route_)
+	this->file_handler_route_ = new(std::map<std::string, FileHandler>);
+    (*this->file_handler_route_)[prefix] = handler;
+    return NULL;  */
+//}
 
 int WebHttpd::start_service() {
     this->server_sock_addr_.sin_family = AF_INET;
@@ -251,17 +306,19 @@ int WebHttpd::start_service() {
             HttpInfoTrans* http_info = new HttpInfoTrans;
             http_info->sock_ = client_sock;
             http_info->handler_route_ = this->handler_route_;
+            http_info->static_file_handler = this->static_file_handler_;
             http_info->client_addr_ = client_sock_addr;
             pthread_create(&pth_handler, NULL, WebHttpd::response_handler, (void*)http_info);
             pthread_detach(pth_handler);
         } catch(...) {
-
+            puts("catch exception!");
         }
     }
     return 0;
 }
 
-void WebHttpd::stop(int sign) {
+void WebHttpd::stop(int) {
+    printf("\nexecute stop!\n");
     for(std::set<int>::iterator iter = WebHttpd::g_sock_sets.begin(); iter != WebHttpd::g_sock_sets.end();iter++) {
         shutdown(*iter, SHUT_RDWR);
         close(*iter);
@@ -270,6 +327,8 @@ void WebHttpd::stop(int sign) {
     exit(0);
 }
 
+
+    
 }
 
 #endif
