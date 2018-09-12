@@ -4,7 +4,7 @@ a C++ http lib.
 
 It's very easy to use.
 
-example:
+Example:
 
 twebhttpd::WebHttpd http;
 
